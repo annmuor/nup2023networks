@@ -12,8 +12,8 @@
 
 #define MAX_SIZE 4096
 #define PORT 25555
-const unsigned char broadcast[] = {255,255,255,255};
-const unsigned char my_addr[] = {0,0,0,0};
+const unsigned char broadcast[] = {10,10,10,127};
+const unsigned char my_addr[] = {10,10,10,66};
 const char *prompt = "chat> ";
 int ssock = -1; void chat_callback(char *);
 
@@ -30,13 +30,12 @@ int main() {
     return 1;
   }
   bind_addr.sin_family = AF_INET;
-  bind_addr.sin_addr.s_addr = *((int *)(broadcast));
+  bind_addr.sin_addr.s_addr = 0;
   bind_addr.sin_port = htons(PORT);
   if(bind(lsock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
     perror("UDP socket bind failed");
     return 1;
   }
-  bind_addr.sin_addr.s_addr = *((int *)(my_addr));
   bind_addr.sin_port = htons(0);
   ssock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if(ssock < 0) {
@@ -78,7 +77,7 @@ int main() {
       *(buf+len) = 0;
       ip = (char *)(&from.sin_addr.s_addr);
       port = ntohs(from.sin_port);
-      printf("\n[%d.%d.%d.%d:%d]: %s\n", *ip, *(ip+1), *(ip+2), *(ip+3), port, buf);
+      printf("\n[%03d.%03d.%03d.%03d]: %s\n", *ip, *(ip+1), *(ip+2), *(ip+3), buf);
       fflush(stdout);
     }
   }

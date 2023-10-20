@@ -1,0 +1,24 @@
+[package]
+name = "simple-server"
+version = "1.2.2"
+authors = ["jocutajar <tellnoone@robajz.info>"]
+license = "MIT OR Apache-2.0"
+description = "SMTP server with focus on privacy"
+documentation = "https://docs.rs/samotop-server/"
+homepage = "https://gitlab.com/BrightOpen/Samotop/-/tree/develop/samotop-server"
+repository = "https://gitlab.com/BrightOpen/Samotop/"
+readme = "README.md"
+keywords = ["smtp", "e-mail", "mail", "email", "server"]
+edition = "2018"
+
+
+[dependencies]
+log = "0.4"
+env_logger = "0.9"
+structopt = "0.3"
+hostname = "0.3"
+async-std = "1"
+async-tls = "0.11"
+rustls = "0.19"
+regex = "1.4"
+samotop = { version = "0.13.2", features = ["delivery", "parser-peg", "smime"] }
