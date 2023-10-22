@@ -74,7 +74,7 @@ async fn start_broadcast(interface: String) -> anyhow::Result<()> {
         .open()?;
     let (tx, mut rx) = unbounded_channel::<Vec<u8>>();
     spawn(gen_packages_ip(sender.clone(), 253, tx.clone()));
-    spawn(gen_packages_udp(sender, 12345, tx));
+    spawn(gen_packages_udp(sender, 25555, tx));
 
     while let Some(packet) = rx.recv().await {
         capture.sendpacket(packet)?;
@@ -106,7 +106,7 @@ async fn gen_packages_udp(
         IpAddr::V4(x) => x.octets(),
         IpAddr::V6(_) => [0xff, 0xff, 0xff, 0xff],
     };
-    let payload = "NUP23{I_g0t_bro4dc4s7_udp_m3ss4g3}";
+    let payload = "NUP23{udp_m3ss4g3}";
     loop {
         let packet = etherparse::PacketBuilder::ethernet2(src_mac, dst_mac)
             .ipv4(src_ip, dst_ip, 255)
@@ -141,7 +141,7 @@ async fn gen_packages_ip(
         IpAddr::V4(x) => x.octets(),
         IpAddr::V6(_) => [0xff, 0xff, 0xff, 0xff],
     };
-    let payload = "NUP23{I_g0t_bro4dc4s7_1p_d4t4}";
+    let payload = "NUP23{bro4dc4s7_1p_d4t4}";
     loop {
         let packet =
             etherparse::PacketBuilder::ethernet2(src_mac, dst_mac).ipv4(src_ip, dst_ip, 255);
