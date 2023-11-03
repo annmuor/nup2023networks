@@ -19,7 +19,7 @@
 const unsigned char ip_hdr[] = {
   0x45, 0x00, 0x00, 0x00, // Version:4 IHL:4, DSCP:6 ECN:2, [Total Len]:16
   0x00, 0x00, 0x00, 0x00, // Identification:16, Flags:3, [Fragment Offset]:13
-  0x40, 0x11, 0x00, 0x00, // TTL:8, Protocol:8, [Header checksum]:16
+  0x40, 0x06, 0x00, 0x00, // TTL:8, Protocol:8, [Header checksum]:16
   SRC_IP,                 // [Source IP Address]:32
   DST_IP                  // [Destination IP Address]:32
 };
@@ -28,9 +28,9 @@ static void fill_iphdr(char* header) {
   memcpy(header, ip_hdr, sizeof(ip_hdr));
 }
 
-static void fill_udp(char* header) {
+static void fill_tcp(char* header) {
   // TODO - do something here
-  memset(header, '0', 11); // 8 bytes udp header + 3 bytes data
+  memset(header, '0', 24); // 8 bytes udp header + 3 bytes data
 }
 
 static in_addr_t address() {
@@ -42,7 +42,7 @@ int main() {
   int s = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
   int one = 1;
   unsigned char packet[256]; // just in case
-  size_t packet_len = 31;    // 20 ip header + 8 udp header + 3 data
+  size_t packet_len = 44;    // 20 ip header + 8 udp header + 0 data
   int i = 0;
   struct sockaddr_in sin = { .sin_family = AF_INET, .sin_addr.s_addr = address(), .sin_port = 0 };
   if (s < 0) {
@@ -54,7 +54,7 @@ int main() {
     return 1;
   }
   fill_iphdr(packet);
-  fill_udp(&packet[20]);
+  fill_tcp(&packet[20]);
   printf("----- PACKET ------\n");
   for (i = 0; i < packet_len; i++)
     printf("%02x ", packet[i]);
