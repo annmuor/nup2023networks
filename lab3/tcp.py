@@ -39,7 +39,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
 sock.setsockopt(socket.SOL_IP, socket.IP_HDRINCL, 1)
 ip_hdr = ip_header(my_ip, target_ip)
 # TODO - fix this 2 variables
-tcp_hdr = b'000000000000000000000000'
+tcp_hdr = b'00000000000000000000'
 data = b''
 # /TODO
 

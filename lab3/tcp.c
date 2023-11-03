@@ -36,7 +36,7 @@ static void fill_iphdr(char* header) {
 
 static void fill_tcp(char* header) {
   // TODO - do something here
-  memset(header, '0', 24); // 8 bytes udp header + 3 bytes data
+  memset(header, '0', 20); // 20 bytes tcp header
 }
 
 static in_addr_t address() {
@@ -48,7 +48,7 @@ int main() {
   int s = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
   int one = 1;
   unsigned char packet[256]; // just in case
-  size_t packet_len = 44;    // 20 ip header + 8 udp header + 0 data
+  size_t packet_len = 40;    // 20 ip header + 20 bytes tcp header
   int i = 0;
   struct sockaddr_in sin = { .sin_family = AF_INET, .sin_addr.s_addr = address(), .sin_port = 0 };
   if (s < 0) {
