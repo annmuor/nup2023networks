@@ -3,11 +3,20 @@ import socket
 from struct import pack
 from time import sleep
 
-# |--------------- UDP HEADER --------------|
-# |    SOURCE PORT     |  DESTINATION PORT  | = 32 bits
+# 
 # |--------------------|--------------------|
-# |      LENGTH        |      CHECKSUM      | = 32 bits
-# |-----------------------------------------|
+# |     SOURCE PORT    |   DESTINATION PORT |
+# |--------------------|--------------------|
+# |            SEQUENCE NUMBER              |
+# |--------------------|--------------------|
+# |          ACKNOWLEDGMENT NUMBER          |
+# |--------------------|--------------------|
+# | DO:4|RSV:3|FLAGSi:9|      WINDOW        |
+# |--------------------|--------------------|
+# |    Checksum        |    URGENT POINTER  |
+# |--------------------|--------------------|
+# 
+# 
 
 def ip_header(src, dst):
     return pack("!BBHHHBBH4s4s", 69, 0, 0, 1, 0, 64, 6, 0, socket.inet_aton(src), socket.inet_aton(dst))
