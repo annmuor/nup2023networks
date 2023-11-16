@@ -106,7 +106,7 @@ async fn gen_packages_udp(
         IpAddr::V4(x) => x.octets(),
         IpAddr::V6(_) => [0xff, 0xff, 0xff, 0xff],
     };
-    let payload = "NUP23{udp_m3ss4g3}";
+    let payload = "NUP23{Flag1}";
     loop {
         let packet = etherparse::PacketBuilder::ethernet2(src_mac, dst_mac)
             .ipv4(src_ip, dst_ip, 255)
@@ -141,7 +141,7 @@ async fn gen_packages_ip(
         IpAddr::V4(x) => x.octets(),
         IpAddr::V6(_) => [0xff, 0xff, 0xff, 0xff],
     };
-    let payload = "NUP23{bro4dc4s7_1p_d4t4}";
+    let payload = "NUP23{Flag2}";
     loop {
         let packet =
             etherparse::PacketBuilder::ethernet2(src_mac, dst_mac).ipv4(src_ip, dst_ip, 255);

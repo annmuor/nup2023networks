@@ -22,7 +22,7 @@ if __name__ == '__main__':
                         message = message.decode("utf-8").strip()
                         if message == "GETFLAG":
                             addr, port = addr
-                            sock.sendto("NUP23{Ch4t_1s_f4n}".encode("utf-8"), (addr, 24555))
+                            sock.sendto("NUP23{Flag3}".encode("utf-8"), (addr, 24555))
                         print(f"[{addr}]>> {message}")
                     except:
                         sys.stdout.write(message)
