@@ -97,7 +97,7 @@ void handler(u_char *user, const struct pcap_pkthdr *header, const u_char *packe
   printf("[%*s]->%s: %*s\n", strnlen(msg->from, sizeof(msg->from)), msg->from, (msg->type==TYPE_PUBLIC)?"all":"me", msg->msg_size, msg->msg);
   if(msg->type == TYPE_PUBLIC) { // broadcast this message now
     u_char bcast[] = {0xff,0xff,0xff,0xff,0xff,0xff};
-    send_message(data->pcap, data->mac, bcast, msg, msg->msg_size);
+    send_message(data->pcap, data->mac, bcast, msg);
     return;
   }
   // Private message to me with flag
@@ -109,7 +109,7 @@ void handler(u_char *user, const struct pcap_pkthdr *header, const u_char *packe
     strncpy(m->msg, FLAG, sizeof(FLAG));
     m->msg_size = sizeof(FLAG);
     m->crc = calc_crc(m->from, m->msg, m->msg_size);
-    send_message(data->pcap, data->mac, h->ether_shost, m, m->msg_size);
+    send_message(data->pcap, data->mac, h->ether_shost, m);
   }
 
 }

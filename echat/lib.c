@@ -68,7 +68,7 @@ u_short calc_crc(const u_char from[8], const u_char* msg, u_char msg_size)
   return htons(res & 0xffff);
 }
 
-void send_message(pcap_t* h, const u_char from[6], const u_char to[6], const chat_message *msg, u_char msg_size)
+void send_message(pcap_t* h, const u_char from[6], const u_char to[6], const chat_message *msg)
 {
   u_char buf[sizeof(struct ether_header) + sizeof(chat_message) + 127];
   struct ether_header* he = (struct ether_header*)buf;
@@ -77,8 +77,8 @@ void send_message(pcap_t* h, const u_char from[6], const u_char to[6], const cha
   memcpy(he->ether_shost, from, 6);
   memcpy(he->ether_dhost, to, 6);
   he->ether_type = ether_type;
-  memcpy(m, msg, sizeof(chat_message) + msg_size);
-  if (pcap_inject(h, (void*)buf, sizeof(struct ether_header) + sizeof(chat_message) + msg_size) < 0) {
+  memcpy(m, msg, sizeof(chat_message) + msg->msg_size);
+  if (pcap_inject(h, (void*)buf, sizeof(struct ether_header) + sizeof(chat_message) + msg->msg_size) < 0) {
     pcap_perror(h, "pcap_inject failed :(");
   }
 }
