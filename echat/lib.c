@@ -11,6 +11,7 @@
  **/
 
 #include "lib.h"
+#include <unistd.h>
 
 u_short ether_type;
 
@@ -25,15 +26,21 @@ u_char* get_mac_address(const char* dev)
   int s;
   if ((s = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
     perror("socket");
-    return NULL;
+    goto null;
   }
   strncpy(ifr.ifr_name, dev, IFNAMSIZ);
   if (ioctl(s, SIOCGIFHWADDR, &ifr) < 0) {
     perror("ioctl");
-    return NULL;
+    goto close_null;
   }
+  close(s);
   memcpy(addr, ifr.ifr_hwaddr.sa_data, 6);
   return addr;
+
+close_null:
+  close(s);
+null:
+  return NULL;
 }
 
 char* mac_to_str(u_char* mac)
