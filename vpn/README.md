@@ -24,7 +24,7 @@ Server shall answer you with the following ICMP packet:
 - ID(2) - 0xffff
 - SEQ(2) - 0xffff
 - Timestamp(16) - 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-- Data(20): client_ip network_mask encryption key
+- Data(16): client_ip network_mask encryption key
 
 #### Fields
 
