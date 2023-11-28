@@ -1,12 +1,14 @@
 import ctypes
+import subprocess
 import threading
+import time
 from _socket import inet_ntoa, inet_aton
-from random import randbytes
 from struct import unpack, pack
 from threading import Thread
-from typing import Tuple
 
 import libpcap
+
+import proto
 
 last_ip = None
 
@@ -21,102 +23,49 @@ def select_next_client_ip() -> str:
     return target
 
 
-def gen_crypto_key() -> bytes:
-    return randbytes(8)
-
-
-def unpack_eth_header(header) -> Tuple[bytes, bytes, int]:
-    return unpack("!6s6sH", header)
-
-
-def pack_eth_header(src: bytes, dst: bytes, ethtype: int) -> bytes:
-    return pack("!6s6sH", dst, src, ethtype)
-
-
-def unpack_ip_header(header) -> Tuple[str, str, int, int]:
-    ip_ihl_ver, ip_tos, ip_len, ip_id, ip_frag, ip_ttl, ip_proto, ip_check, \
-        ip_saddr, ip_daddr = unpack('!BBHHHBBH4s4s', header)
-    return inet_ntoa(ip_saddr), inet_ntoa(ip_daddr), ip_proto, ip_len
-
-
-def internet_checksum(data: bytes) -> int:
-    checksum = 0
-    if len(data) % 2 != 0:
-        data += b'\x00'  # add padding
-    for i in range(0, len(bytes), 2):
-        up = unpack("!H", data[i:i + 2])
-        checksum += up
-    while checksum > 0xffff:
-        checksum = (checksum & 0xffff) + (checksum >> 16)
-    return ~checksum
-
-
-def pack_ip_header(src: str, dst: str, ip_proto: int, _len: int) -> bytes:
-    no_checksum_hdr = pack("!BBHHHBBH4s4s", 0x45, 00, _len, 0, 0x4000, 64, ip_proto, 0, inet_aton(src), inet_aton(dst))
-    checksum = internet_checksum(no_checksum_hdr)
-    return pack("!BBHHHBBH4s4s", 0x45, 00, _len, 0, 0x4000, 64, ip_proto, checksum, inet_aton(src), inet_aton(dst))
-
-
-def unpack_icmp_header(header) -> Tuple[int, int, int, int]:
-    icmp_type, icmp_code, checksum, _id, seq, timestamp = unpack("!BBHHH16s", header)
-    return icmp_type, icmp_code, _id, seq
-
-
-def pack_icmp(icmp_type: int, icmp_code: int, _id: int, seq: int, data) -> bytes:
-    no_checksum_header = pack("!BBHHH", icmp_type, icmp_code, 0, _id, seq)
-    no_checksum_header += b'\x00' * 16
-    no_checksum_header += data
-    checksum = internet_checksum(no_checksum_header)
-    checksum_header = pack("!BBHHH", icmp_type, icmp_code, checksum, _id, seq)
-    return checksum_header + b'\x00' * 16 + data
-
-
 class VPNServerClient(object):
-    def __init__(self, cli_ip, srv_ip, cli_mac, srv_mac):
+    def __init__(self, server, cli_ip, srv_ip, cli_mac, srv_mac):
         self.cli_ip = cli_ip
         self.srv_ip = srv_ip
         self.cli_mac = cli_mac
         self.srv_mac = srv_mac
         self.vpn_ip = select_next_client_ip()
-        self.vpn_key = gen_crypto_key()
+        self.vpn_key = proto.gen_crypto_key()
         self._handshake = False
+        self._last = time.time()
         print(f"new vpn client: {cli_ip}:{self.vpn_ip}")
 
     def had_handshake(self) -> bool:
         return self._handshake
 
-    def send_handshake(self, interface):
-        data = pack("4s4s8s", inet_aton(self.vpn_ip), inet_aton('255.255.255.0'), self.vpn_key)
-        eth_hdr = pack_eth_header(self.cli_mac, self.srv_mac, 0x0800)
-        icmp_data = pack_icmp(0, 0, 0xffff, 0xffff, data)
-        ip_hdr = pack_ip_header(self.cli_ip, self.srv_ip, 0x01, len(data) + 20)
-        buffer = eth_hdr + ip_hdr + icmp_data
-        libpcap.inject(interface, buffer, len(buffer))
-        self._handshake = True
-        print(f"[outer] sent handshake: {self.cli_ip}:{self.vpn_ip} -> {buffer}")
+    def is_dead(self) -> bool:
+        return time.time() - self._last > 30
 
     def send_data(self, interface, data, _len):
-        eth_hdr = pack_eth_header(b'\x00' * 6, b'\x00' * 6, 0x0800)
-        # TODO: decode data
+        eth_hdr = proto.pack_eth_header(b'\x00' * 6, b'\x00' * 6, 0x0800)
+        data = proto.encrypt_bytes(data, self.vpn_key)
         buffer = eth_hdr + data[:_len]
         libpcap.inject(interface, buffer, len(buffer))
+        self._last = time.time()
         print(f"[inner] sent data: {self.cli_ip}:{self.vpn_ip} -> {buffer}")
 
     def encode_and_send(self, interface, data):
-        eth_hdr = pack_eth_header(self.cli_mac, self.srv_mac, 0x0800)
-        # TODO: encode data
-        icmp_data = pack_icmp(0, 0, len(data), 0xffff, data)
-        ip_hdr = pack_ip_header(self.cli_ip, self.srv_ip, 0x01, len(icmp_data) + 20)
+        eth_hdr = proto.pack_eth_header(self.cli_mac, self.srv_mac, 0x0800)
+        data = proto.encrypt_bytes(data, self.vpn_key)
+        icmp_data = proto.pack_icmp(0, 0, len(data), 0xffff, data)
+        ip_hdr = proto.pack_ip_header(self.cli_ip, self.srv_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
         libpcap.inject(interface, buffer, len(buffer))
+        self._last = time.time()
         print(f"[outer] sent data: {self.cli_ip}:{self.vpn_ip} -> {buffer}")
 
 
 class VPNServer(object):
-    def __init__(self, inner_ip, outer_int, ):
+    def __init__(self, inner_ip, netmask, outer_int, ):
         global last_ip
         self.inner_int = "lo"
         self.inner_ip = inner_ip
+        self.netmask = netmask
         self.inner_pcap = None
         self.outer_int = outer_int
         self.outer_pcap = None
@@ -124,6 +73,8 @@ class VPNServer(object):
         self.lock = threading.Lock()
         last_ip, = unpack("!L", inet_aton(self.inner_ip))
         last_ip += 10
+        self._inner_ip_int, = unpack("!L", inet_aton(self.inner_ip))
+        self._inner_mask_int, = unpack("!L", inet_aton(self.netmask))
 
     def init_libpcap(self):
         try:
@@ -146,10 +97,59 @@ class VPNServer(object):
             print(f"init_libpcap went wrong: {e}")
             exit(1)
 
-    def run(self):
-        self.init_libpcap()
-        Thread(target=self.thread_inner, name="thread_inner").start()
-        self.thread_outer()
+    def is_my_client(self, ip):
+        _ip_int, = unpack("!L", inet_aton(ip))
+        return True if _ip_int & self._inner_mask_int == self._inner_ip_int & self._inner_mask_int \
+            else False
+
+    def send_handshake(self, client: VPNServerClient):
+        data = pack("4s4s8s", inet_aton(client.vpn_ip), inet_aton(self.netmask), client.vpn_key)
+        eth_hdr = proto.pack_eth_header(client.cli_mac, client.srv_mac, 0x0800)
+        icmp_data = proto.pack_icmp(0, 0, 0xffff, 0xffff, data)
+        ip_hdr = proto.pack_ip_header(client.cli_ip, client.srv_ip, 0x01, len(data) + 20)
+        buffer = eth_hdr + ip_hdr + icmp_data
+        libpcap.inject(self.outer_pcap, buffer, len(buffer))
+        client._handshake = True
+        client._last = time.time()
+        print(f"[outer] sent handshake: {client.cli_ip}:{client.vpn_ip} -> {buffer}")
+
+    def receive_data_from_client(self, client: VPNServerClient, data: bytes, _len: int):
+        eth_hdr = proto.pack_eth_header(b'\x00' * 6, b'\x00' * 6, 0x0800)
+        data = proto.encrypt_bytes(data, client.vpn_key)
+        data = data[:_len]
+        # if this is the data for _our_ client - let's check the IP header
+        if len(data) < 20:
+            return
+        src, dst, _proto, _len = proto.unpack_ip_header(data[:20])
+        if src != client.vpn_ip:
+            print(f"Client sent us a packet from not their IP: {src} != {client.vpn_ip}")
+            return
+        # check if this is for our client
+        _target_client = None
+        if self.is_my_client(dst):
+            with self.lock:
+                if dst in self.clients:
+                    _target_client = self.clients[dst]
+                else:
+                    print(f"Package for my client {dst}, but I haven't this client connected here")
+                    return
+        if _target_client is not None:
+            self.send_data_to_client(_target_client, data)
+        else:
+            buffer = eth_hdr + data
+            libpcap.inject(self.inner_pcap, buffer, len(buffer))
+            client._last = time.time()
+            print(f"[inner] sent data: {client.cli_ip}:{client.vpn_ip} -> {buffer}")
+
+    def send_data_to_client(self, client: VPNServerClient, data: bytes):
+        eth_hdr = proto.pack_eth_header(client.cli_mac, client.srv_mac, 0x0800)
+        data = proto.encrypt_bytes(data, client.vpn_key)
+        icmp_data = proto.pack_icmp(0, 0, len(data), 0xffff, data)
+        ip_hdr = proto.pack_ip_header(client.cli_ip, client.srv_ip, 0x01, len(icmp_data) + 20)
+        buffer = eth_hdr + ip_hdr + icmp_data
+        libpcap.inject(self.outer_pcap, buffer, len(buffer))
+        client._last = time.time()
+        print(f"[outer] sent data: {client.cli_ip}:{client.vpn_ip} -> {buffer}")
 
     def thread_outer(self):
         if libpcap.activate(self.outer_pcap) < 0:
@@ -160,13 +160,13 @@ class VPNServer(object):
                 hdr = libpcap.pkthdr()
                 data = libpcap.next(self.outer_pcap, hdr)
                 buff = bytes([data[x] for x in range(0, hdr.caplen)])
-                mac_dst, mac_src, eth_type = unpack_eth_header(buff[:14])
+                mac_dst, mac_src, eth_type = proto.unpack_eth_header(buff[:14])
                 if eth_type != 0x0800:  # Not IP protocol
                     continue
-                ip_src, ip_dst, ip_proto, ip_len = unpack_ip_header(buff[14:34])
+                ip_src, ip_dst, ip_proto, ip_len = proto.unpack_ip_header(buff[14:34])
                 if ip_proto != 0x01:  # Not ICMP
                     continue
-                icmp_type, icmp_code, icmp_id, icmp_seq = unpack_icmp_header(buff[34:58])
+                icmp_type, icmp_code, icmp_id, icmp_seq = proto.unpack_icmp_header(buff[34:58])
                 data = buff[58:]
                 print(
                     f"[outer] got {ip_src} -> {ip_dst} {ip_proto} {ip_len} {icmp_type} {icmp_code} {icmp_id} {icmp_seq} {data} packet")
@@ -182,7 +182,7 @@ class VPNServer(object):
                     continue
                 if not client.had_handshake():
                     # write client his IP back
-                    client.send_handshake(self.outer_pcap)
+                    self.send_handshake(client)
                 else:
                     # write client's packet into inner interface
                     client.send_data(self.inner_pcap, data, icmp_id)
@@ -200,10 +200,10 @@ class VPNServer(object):
                 hdr = libpcap.pkthdr()
                 data = libpcap.next(self.inner_pcap, hdr)
                 buff = bytes([data[x] for x in range(0, hdr.caplen)])
-                mac_dst, mac_src, eth_type = unpack_eth_header(buff[:14])
+                mac_dst, mac_src, eth_type = proto.unpack_eth_header(buff[:14])
                 if eth_type != 0x0800:  # Not IP datagram
                     continue
-                ip_src, ip_dst, ip_proto, ip_len = unpack_ip_header(buff[14:34])
+                ip_src, ip_dst, ip_proto, ip_len = proto.unpack_ip_header(buff[14:34])
                 if ip_dst == self.inner_ip:
                     continue
                 if ip_dst == ip_src:  # all this 127.0.0.1 @ lo traffic goes home
@@ -221,11 +221,39 @@ class VPNServer(object):
             except:
                 pass
 
+    def run(self):
+        self.init_libpcap()
+        inner = Thread(target=self.thread_inner, name="thread_inner")
+        inner.daemon = True
+        inner.start()
+        outer = Thread(target=self.thread_outer, name="thread_outer")
+        outer.daemon = True
+        outer.start()
+        # loop and list clients that is expired
+        # set IP address
+        prefix = proto.netmask_to_prefix(self.netmask)
+        prefix_ip = self._inner_ip_int & self._inner_mask_int
+        prefix_ip = inet_ntoa(pack("!L", prefix_ip))
+        subprocess.run(["ip", "addr", "add", f"{self.inner_ip}/32", "dev", "lo"])
+        subprocess.run(["ip", "route", "add", f"{prefix_ip}/{prefix}", "dev", "lo", "src", self.inner_ip])
+        try:
+            while True:
+                with self.lock:
+                    to_remove = [x for x in self.clients.keys() if self.clients[x].is_dead()]
+                    for key in to_remove:
+                        del self.clients[key]
+                time.sleep(30)
+        except KeyboardInterrupt:
+            print("Exiting....")
+            subprocess.run(["ip", "route", "del", f"{prefix_ip}/{prefix}", "dev", "lo", "src", self.inner_ip])
+            subprocess.run(["ip", "addr", "del", f"{self.inner_ip}/32", "dev", "lo"])
+            exit(0)
+
 
 if __name__ == '__main__':
     from sys import argv
 
-    if len(argv) != 3:
-        print(f"Usage: {argv[0]} <server_inner_ip> <outer int>")
+    if len(argv) != 4:
+        print(f"Usage: {argv[0]} <server_inner_ip> <netmask> <outer int>")
         exit(1)
-    VPNServer(argv[1], argv[2]).run()
+    VPNServer(argv[1], argv[2], argv[3]).run()
