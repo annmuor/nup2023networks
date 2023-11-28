@@ -28,7 +28,6 @@ Server shall answer you with the following ICMP packet:
 
 #### Fields
 
-* Server IP - four bytes, network (BE) order
 * Client IP - four bytes, network (BE) order
 * Network Mask - four bytes, network (BE) order
 * Encryption key - eight bytes
@@ -42,3 +41,4 @@ the key provided by the server.
 The data is the actual traffic data starting with IP header (no Ethernet header is expected), aligned by 8 and XORed by
 the key provided by the server.
 
+**Keepalive** is sent by sending any data less than 20 bytes and shall be sent at least every 25 seconds

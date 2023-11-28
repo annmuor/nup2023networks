@@ -41,24 +41,6 @@ class VPNServerClient(object):
     def is_dead(self) -> bool:
         return time.time() - self._last > 30
 
-    def send_data(self, interface, data, _len):
-        eth_hdr = proto.pack_eth_header(b'\x00' * 6, b'\x00' * 6, 0x0800)
-        data = proto.encrypt_bytes(data, self.vpn_key)
-        buffer = eth_hdr + data[:_len]
-        libpcap.inject(interface, buffer, len(buffer))
-        self._last = time.time()
-        print(f"[inner] sent data: {self.cli_ip}:{self.vpn_ip} -> {buffer}")
-
-    def encode_and_send(self, interface, data):
-        eth_hdr = proto.pack_eth_header(self.cli_mac, self.srv_mac, 0x0800)
-        data = proto.encrypt_bytes(data, self.vpn_key)
-        icmp_data = proto.pack_icmp(0, 0, len(data), 0xffff, data)
-        ip_hdr = proto.pack_ip_header(self.cli_ip, self.srv_ip, 0x01, len(icmp_data) + 20)
-        buffer = eth_hdr + ip_hdr + icmp_data
-        libpcap.inject(interface, buffer, len(buffer))
-        self._last = time.time()
-        print(f"[outer] sent data: {self.cli_ip}:{self.vpn_ip} -> {buffer}")
-
 
 class VPNServer(object):
     def __init__(self, inner_ip, netmask, outer_int, ):
@@ -118,7 +100,7 @@ class VPNServer(object):
         data = proto.encrypt_bytes(data, client.vpn_key)
         data = data[:_len]
         # if this is the data for _our_ client - let's check the IP header
-        if len(data) < 20:
+        if len(data) < 20: # keep-alive ?
             return
         src, dst, _proto, _len = proto.unpack_ip_header(data[:20])
         if src != client.vpn_ip:
@@ -148,7 +130,6 @@ class VPNServer(object):
         ip_hdr = proto.pack_ip_header(client.cli_ip, client.srv_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
         libpcap.inject(self.outer_pcap, buffer, len(buffer))
-        client._last = time.time()
         print(f"[outer] sent data: {client.cli_ip}:{client.vpn_ip} -> {buffer}")
 
     def thread_outer(self):
@@ -176,20 +157,17 @@ class VPNServer(object):
                 with self.lock:
                     if ip_src in self.clients:
                         client = self.clients[ip_src]
+                        client._last = time.time()
                     else:
                         client = VPNServerClient(cli_ip=ip_src, srv_ip=ip_dst, cli_mac=mac_src, srv_mac=mac_dst)
-                if client is None:
-                    continue
                 if not client.had_handshake():
-                    # write client his IP back
+                    # write a client his IP back
                     self.send_handshake(client)
                 else:
                     # write client's packet into inner interface
-                    client.send_data(self.inner_pcap, data, icmp_id)
-            except KeyboardInterrupt:
-                exit(1)
-            except:
-                pass
+                    self.receive_data_from_client(client, data, icmp_id)
+            except Exception as e:
+                print("thread_outer exception: {e}")
 
     def thread_inner(self):
         if libpcap.activate(self.inner_pcap) < 0:
@@ -215,11 +193,10 @@ class VPNServer(object):
                         client = self.clients[ip_dst]
                 if client is None:
                     continue
-                client.encode_and_send(self.outer_pcap, buff[14:])  # keep all stuff as it was except for MAC layer
-            except KeyboardInterrupt:
-                exit(1)
-            except:
-                pass
+                client._last = time.time()
+                self.send_data_to_client(client, buff[14:])  # keep all stuff as it was except for MAC layer
+            except Exception as e:
+                print("thread_inner exception: {e}")
 
     def run(self):
         self.init_libpcap()
@@ -229,7 +206,7 @@ class VPNServer(object):
         outer = Thread(target=self.thread_outer, name="thread_outer")
         outer.daemon = True
         outer.start()
-        # loop and list clients that is expired
+        # loop and list clients that are expired
         # set IP address
         prefix = proto.netmask_to_prefix(self.netmask)
         prefix_ip = self._inner_ip_int & self._inner_mask_int
@@ -242,6 +219,7 @@ class VPNServer(object):
                     to_remove = [x for x in self.clients.keys() if self.clients[x].is_dead()]
                     for key in to_remove:
                         del self.clients[key]
+                        print(f"Client {key} is considered inactive and dropped")
                 time.sleep(30)
         except KeyboardInterrupt:
             print("Exiting....")
