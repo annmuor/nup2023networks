@@ -24,7 +24,7 @@ def select_next_client_ip() -> str:
 
 
 class VPNServerClient(object):
-    def __init__(self, server, cli_ip, srv_ip, cli_mac, srv_mac):
+    def __init__(self, cli_ip, srv_ip, cli_mac, srv_mac):
         self.cli_ip = cli_ip
         self.srv_ip = srv_ip
         self.cli_mac = cli_mac
@@ -86,9 +86,9 @@ class VPNServer(object):
 
     def send_handshake(self, client: VPNServerClient):
         data = pack("4s4s8s", inet_aton(client.vpn_ip), inet_aton(self.netmask), client.vpn_key)
-        eth_hdr = proto.pack_eth_header(client.cli_mac, client.srv_mac, 0x0800)
+        eth_hdr = proto.pack_eth_header(client.srv_mac, client.cli_mac, 0x0800)
         icmp_data = proto.pack_icmp(0, 0, 0xffff, 0xffff, data)
-        ip_hdr = proto.pack_ip_header(client.cli_ip, client.srv_ip, 0x01, len(data) + 20)
+        ip_hdr = proto.pack_ip_header(client.srv_ip, client.cli_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
         libpcap.inject(self.outer_pcap, buffer, len(buffer))
         client._handshake = True
@@ -108,7 +108,7 @@ class VPNServer(object):
             return
         # check if this is for our client
         _target_client = None
-        if self.is_my_client(dst):
+        if self.is_my_client(dst) and dst != self.inner_ip:
             with self.lock:
                 if dst in self.clients:
                     _target_client = self.clients[dst]
@@ -141,6 +141,8 @@ class VPNServer(object):
                 hdr = libpcap.pkthdr()
                 data = libpcap.next(self.outer_pcap, hdr)
                 buff = bytes([data[x] for x in range(0, hdr.caplen)])
+                if len(buff) < 34:
+                    continue
                 mac_dst, mac_src, eth_type = proto.unpack_eth_header(buff[:14])
                 if eth_type != 0x0800:  # Not IP protocol
                     continue
@@ -160,6 +162,7 @@ class VPNServer(object):
                         client._last = time.time()
                     else:
                         client = VPNServerClient(cli_ip=ip_src, srv_ip=ip_dst, cli_mac=mac_src, srv_mac=mac_dst)
+                        self.clients[ip_src] = client
                 if not client.had_handshake():
                     # write a client his IP back
                     self.send_handshake(client)
@@ -167,7 +170,7 @@ class VPNServer(object):
                     # write client's packet into inner interface
                     self.receive_data_from_client(client, data, icmp_id)
             except Exception as e:
-                print("thread_outer exception: {e}")
+                print(f"thread_outer exception: {e}")
 
     def thread_inner(self):
         if libpcap.activate(self.inner_pcap) < 0:
@@ -178,6 +181,8 @@ class VPNServer(object):
                 hdr = libpcap.pkthdr()
                 data = libpcap.next(self.inner_pcap, hdr)
                 buff = bytes([data[x] for x in range(0, hdr.caplen)])
+                if len(buff) < 34:
+                    continue
                 mac_dst, mac_src, eth_type = proto.unpack_eth_header(buff[:14])
                 if eth_type != 0x0800:  # Not IP datagram
                     continue
@@ -196,7 +201,7 @@ class VPNServer(object):
                 client._last = time.time()
                 self.send_data_to_client(client, buff[14:])  # keep all stuff as it was except for MAC layer
             except Exception as e:
-                print("thread_inner exception: {e}")
+                print(f"thread_inner exception: {e}")
 
     def run(self):
         self.init_libpcap()
