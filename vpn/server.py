@@ -124,10 +124,10 @@ class VPNServer(object):
             print(f"[inner] sent data: {client.cli_ip}:{client.vpn_ip} -> {buffer}")
 
     def send_data_to_client(self, client: VPNServerClient, data: bytes):
-        eth_hdr = proto.pack_eth_header(client.cli_mac, client.srv_mac, 0x0800)
+        eth_hdr = proto.pack_eth_header(client.srv_mac, client.cli_mac, 0x0800)
         data = proto.encrypt_bytes(data, client.vpn_key)
         icmp_data = proto.pack_icmp(0, 0, len(data), 0xffff, data)
-        ip_hdr = proto.pack_ip_header(client.cli_ip, client.srv_ip, 0x01, len(icmp_data) + 20)
+        ip_hdr = proto.pack_ip_header(client.srv_ip, client.cli_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
         libpcap.inject(self.outer_pcap, buffer, len(buffer))
         print(f"[outer] sent data: {client.cli_ip}:{client.vpn_ip} -> {buffer}")
@@ -196,6 +196,8 @@ class VPNServer(object):
                 with self.lock:
                     if ip_dst in self.clients:
                         client = self.clients[ip_dst]
+                    else:
+                        print(f"{ip_dst} not found lol")
                 if client is None:
                     continue
                 client._last = time.time()
