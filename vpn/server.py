@@ -103,6 +103,8 @@ class VPNServer(object):
     def receive_data_from_client(self, client: VPNServerClient, data: bytes):
         eth_hdr = proto.pack_eth_header(b'\x00' * 6, b'\x00' * 6, 0x0800)
         _len, = unpack("!H", data[:2])
+        if _len == 0:
+            return
         data = proto.encrypt_bytes(data[2:], client.vpn_key)
         data = data[:_len]
         # if this is the data for _our_ client - let's check the IP header
