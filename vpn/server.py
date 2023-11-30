@@ -44,14 +44,16 @@ class VPNServerClient(object):
 
 class VPNServer(object):
     def __init__(self, inner_ip, netmask, outer_int, ):
+        from multiprocessing import Manager
         global last_ip
+        self.manager = Manager()
         self.inner_int = "lo"
         self.inner_ip = inner_ip
         self.netmask = netmask
         self.inner_pcap = None
         self.outer_int = outer_int
         self.outer_pcap = None
-        self.clients = {}
+        self.clients = self.manager.dict()
         self.lock = threading.Lock()
         last_ip, = unpack("!L", inet_aton(self.inner_ip))
         last_ip += 10
@@ -100,7 +102,7 @@ class VPNServer(object):
         data = proto.encrypt_bytes(data, client.vpn_key)
         data = data[:_len]
         # if this is the data for _our_ client - let's check the IP header
-        if len(data) < 20: # keep-alive ?
+        if len(data) < 20:  # keep-alive ?
             return
         src, dst, _proto, _len = proto.unpack_ip_header(data[:20])
         if src != client.vpn_ip:
@@ -132,7 +134,7 @@ class VPNServer(object):
         libpcap.inject(self.outer_pcap, buffer, len(buffer))
         print(f"[outer] sent data: {client.cli_ip}:{client.vpn_ip} -> {buffer}")
 
-    def thread_outer(self):
+    def thread_outer(self, clients):
         if libpcap.activate(self.outer_pcap) < 0:
             print("Failed to activate outer pcap")
             exit(1)
@@ -155,14 +157,12 @@ class VPNServer(object):
                     f"[outer] got {ip_src} -> {ip_dst} {ip_proto} {ip_len} {icmp_type} {icmp_code} {icmp_id} {icmp_seq} {data} packet")
                 if icmp_type != 0x08 or icmp_code != 0x00 or icmp_seq != 0xffff:
                     continue
-                client = None
-                with self.lock:
-                    if ip_src in self.clients:
-                        client = self.clients[ip_src]
-                        client._last = time.time()
-                    else:
-                        client = VPNServerClient(cli_ip=ip_src, srv_ip=ip_dst, cli_mac=mac_src, srv_mac=mac_dst)
-                        self.clients[ip_src] = client
+                if ip_src in clients:
+                    client = clients[ip_src]
+                    client._last = time.time()
+                else:
+                    client = VPNServerClient(cli_ip=ip_src, srv_ip=ip_dst, cli_mac=mac_src, srv_mac=mac_dst)
+                    clients[ip_src] = client
                 if not client.had_handshake():
                     # write a client his IP back
                     self.send_handshake(client)
@@ -172,7 +172,7 @@ class VPNServer(object):
             except Exception as e:
                 print(f"thread_outer exception: {e}")
 
-    def thread_inner(self):
+    def thread_inner(self, clients):
         if libpcap.activate(self.inner_pcap) < 0:
             print("Failed to activate outer pcap")
             exit(1)
@@ -193,11 +193,10 @@ class VPNServer(object):
                     continue
                 print(f"[inner] got {ip_src} -> {ip_dst} {ip_proto} {ip_len} packet")
                 client = None
-                with self.lock:
-                    if ip_dst in self.clients:
-                        client = self.clients[ip_dst]
-                    else:
-                        print(f"{ip_dst} not found lol")
+                if ip_dst in clients:
+                    client = clients[ip_dst]
+                else:
+                    print(f"{ip_dst} not found lol")
                 if client is None:
                     continue
                 client._last = time.time()
@@ -207,10 +206,10 @@ class VPNServer(object):
 
     def run(self):
         self.init_libpcap()
-        inner = Thread(target=self.thread_inner, name="thread_inner")
+        inner = Thread(target=self.thread_inner, name="thread_inner", args=(self.clients,))
         inner.daemon = True
         inner.start()
-        outer = Thread(target=self.thread_outer, name="thread_outer")
+        outer = Thread(target=self.thread_outer, name="thread_outer", args=(self.clients,))
         outer.daemon = True
         outer.start()
         # loop and list clients that are expired
