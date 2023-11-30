@@ -47,4 +47,4 @@ After this session is considered ready and client and server may exchange data u
 echo-reply.
 
 ### Session Example
-Client: 
+See [session.pcap](session.pcap)
