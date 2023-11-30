@@ -1,7 +1,12 @@
 from _socket import inet_ntoa, inet_aton
-from random import randbytes
 from struct import unpack, pack
 from typing import Tuple
+try:
+    from random import randbytes
+except ImportError:
+    def randbytes(_len: int) -> bytes:
+        from random import randint
+        return bytearray([randint(0, 255) for _x in range(0,_len)])
 
 
 def gen_crypto_key() -> bytes:

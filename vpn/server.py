@@ -34,6 +34,7 @@ class VPNServerClient(object):
         self.vpn_key = proto.gen_crypto_key()
         self.handshake = False
         self._last = time.time()
+        self.last_icmp_id = 0
         print(f"new vpn client: {cli_ip}:{self.vpn_ip}")
 
     def had_handshake(self) -> bool:
@@ -90,7 +91,7 @@ class VPNServer(object):
     def send_handshake(self, client: VPNServerClient):
         data = pack("4s4s8s", inet_aton(client.vpn_ip), inet_aton(self.netmask), client.vpn_key)
         eth_hdr = proto.pack_eth_header(client.srv_mac, client.cli_mac, 0x0800)
-        icmp_data = proto.pack_icmp(0, 0, 0xffff, 0xffff, data)
+        icmp_data = proto.pack_icmp(0, 0, client.last_icmp_id, 0xffff, data)
         ip_hdr = proto.pack_ip_header(client.srv_ip, client.cli_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
         libpcap.inject(self.outer_pcap, buffer, len(buffer))
@@ -99,9 +100,10 @@ class VPNServer(object):
         print(
             f"[inject {self.outer_int}] handshake {client.srv_ip} -> {client.cli_ip} ({client.vpn_ip} {self.netmask} {[x for x in client.vpn_key]})")
 
-    def receive_data_from_client(self, client: VPNServerClient, data: bytes, _len: int):
+    def receive_data_from_client(self, client: VPNServerClient, data: bytes):
         eth_hdr = proto.pack_eth_header(b'\x00' * 6, b'\x00' * 6, 0x0800)
-        data = proto.encrypt_bytes(data, client.vpn_key)
+        _len, = unpack("!H", data[:2])
+        data = proto.encrypt_bytes(data[2:], client.vpn_key)
         data = data[:_len]
         # if this is the data for _our_ client - let's check the IP header
         if len(data) < 20:  # keep-alive ?
@@ -130,8 +132,9 @@ class VPNServer(object):
         eth_hdr = proto.pack_eth_header(client.srv_mac, client.cli_mac, 0x0800)
         inner_src_ip, inner_dst_ip, inner_proto, inner_len = proto.unpack_ip_header(data[:20])
         data = proto.repack_packet_with_checksum(data)
-        data = proto.encrypt_bytes(data, client.vpn_key)
-        icmp_data = proto.pack_icmp(0, 0, len(data), 0xffff, data)
+        _len = pack("!H", len(data))
+        data = _len + proto.encrypt_bytes(data, client.vpn_key)
+        icmp_data = proto.pack_icmp(0, 0, client.last_icmp_id, 0xffff, data)
         ip_hdr = proto.pack_ip_header(client.srv_ip, client.cli_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
         libpcap.inject(self.outer_pcap, buffer, len(buffer))
@@ -162,15 +165,15 @@ class VPNServer(object):
                     continue
                 if ip_src in self.clients:
                     client = self.clients[ip_src]
-                    client._last = time.time()
                 else:
                     client = VPNServerClient(cli_ip=ip_src, srv_ip=ip_dst, cli_mac=mac_src, srv_mac=mac_dst)
-                if ip_src not in hs and data == b'\xde\xad\xbe\xef\xde\xad\xbe\xef':
+                client.last_icmp_id = icmp_id
+                if data == b'\xde\xad\xbe\xef\xde\xad\xbe\xef':
                     self.send_handshake(client)
                     self.clients[ip_src] = client
                     hs[ip_src] = True
                 else:
-                    self.receive_data_from_client(client, data, icmp_id)
+                    self.receive_data_from_client(client, data)
             except Exception as e:
                 print(f"thread_outer exception: {e}")
 
