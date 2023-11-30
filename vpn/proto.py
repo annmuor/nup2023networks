@@ -46,16 +46,17 @@ def pack_ip_header(src: str, dst: str, ip_proto: int, _len: int) -> bytes:
 
 
 def unpack_icmp_header(header) -> Tuple[int, int, int, int]:
-    icmp_type, icmp_code, checksum, _id, seq = unpack("!BBHHH", header)
+    icmp_type, icmp_code, checksum, _id, seq, timestamp = unpack("!BBHHH16s", header)
     return icmp_type, icmp_code, _id, seq
 
 
 def pack_icmp(icmp_type: int, icmp_code: int, _id: int, seq: int, data) -> bytes:
     no_checksum_header = pack("!BBHHH", icmp_type, icmp_code, 0, _id, seq)
+    no_checksum_header += b'\x00' * 16
     no_checksum_header += data
     checksum = internet_checksum(no_checksum_header)
     checksum_header = pack("!BBHHH", icmp_type, icmp_code, checksum, _id, seq)
-    return checksum_header
+    return checksum_header + b'\x00' * 16 + data
 
 
 def encrypt_bytes(data: bytes, key: bytes) -> bytes:

@@ -13,6 +13,7 @@ This VPN uses ICMP Echo-Request and Echo-Reply protocol
 | CODE      | 1     | 0      |
 | ID        | 2     | 65535  |
 | SEQ       | 2     | 65535  |
+| TIMESTAMP | 16    | 0      |
 | DATA      | Vary  | Vary   |
 
 #### TYPE
@@ -46,4 +47,4 @@ After this session is considered ready and client and server may exchange data u
 echo-reply.
 
 ### Session Example
- 
+Client: 
