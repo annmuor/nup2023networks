@@ -56,8 +56,7 @@ def pack_icmp(icmp_type: int, icmp_code: int, _id: int, seq: int, data) -> bytes
 
 def encrypt_bytes(data: bytes, key: bytes) -> bytes:
     ret = bytearray()
-    _rest = len(key) - len(data) if len(data) < len(key) \
-        else len(data) % len(key)
+    _rest = 8 - (len(data) % len(key))
     data += randbytes(_rest)
     for b in range(0, len(data), len(key)):
         for k in range(0, len(key)):
@@ -72,3 +71,48 @@ def netmask_to_prefix(netmask):
         if int_mask & _prefix == _prefix:
             return 32 - shift_bit
     return 32
+
+
+def pack_tcp_header(sport, dport, check=0):
+    tcp_seq = 0
+    tcp_ack = 0
+    tcp_doff = (5 << 4) + 0
+    tcp_flags = 0 + (1 << 1) + (0 << 2) + (0 << 3) + (0 << 4) + (0 << 5)
+    tcp_window = 0
+    tcp_hdr = pack('!HHLLBBHHH', sport, dport, tcp_seq, tcp_ack, tcp_doff, tcp_flags, tcp_window, check,
+                   0)
+    return tcp_hdr
+
+
+def unpack_tcp_header(header) -> Tuple[int, int, int]:
+    sport, dport, tcp_seq, tcp_ack, tcp_doff, \
+        tcp_flags, tcp_window, check, urg = unpack('!HHLLBBHHH', header)
+    return
+
+
+def repack_packet_with_checksum(packet: bytes) -> bytes:
+    ip_saddr, ip_daddr, _proto, _len = unpack_ip_header(packet[:20])
+    if _proto == 0x06:  # tcp
+        sport, dport, tcp_seq, tcp_ack, tcp_doff, \
+            tcp_flags, tcp_window, check, urg = unpack('!HHLLBBHHH', packet[20:40])
+        data = packet[40:]
+        phdr = pack("!4s4sBBH", inet_aton(ip_saddr), inet_aton(ip_daddr), 0, 0x06, len(packet) - 20)
+        tcp_zero_hdr = pack('!HHLLBBHHH', sport, dport, tcp_seq, tcp_ack, tcp_doff,
+                            tcp_flags, tcp_window, 0, urg)
+        check = internet_checksum(phdr + tcp_zero_hdr + data)
+        tcp_hdr = pack('!HHLLBBHHH', sport, dport, tcp_seq, tcp_ack, tcp_doff,
+                       tcp_flags, tcp_window, check, urg)
+
+        ip_hdr = pack_ip_header(ip_saddr, ip_daddr, 0x06, 40 + len(data))
+        return ip_hdr + tcp_hdr + data
+
+    if _proto == 0x11:  # udp
+        sport, dport, _udp_len, chksum = unpack("!HHHH", packet[20:28])
+        phdr = pack("!4s4sBBH", inet_aton(ip_saddr), inet_aton(ip_daddr), 0, 0x11, _udp_len)
+        udp_zero_hdr = pack("!HHHH", sport, dport, _udp_len, 0)
+        data = packet[28:]
+        chksum = internet_checksum(phdr + udp_zero_hdr + data)
+        udp_hdr = pack("!HHHH", sport, dport, _udp_len, chksum)
+        ip_hdr = pack_ip_header(ip_saddr, ip_daddr, 0x11, 20 + 8 + len(data))
+        return ip_hdr + udp_hdr + data
+    return packet
