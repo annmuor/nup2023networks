@@ -212,7 +212,6 @@ class VPNServer(object):
 
     def run(self):
         self.init_libpcap()
-        manager = Manager()
         inner = Thread(target=self.thread_inner, name="thread_inner", args=(self.clients,))
         inner.daemon = True
         inner.start()

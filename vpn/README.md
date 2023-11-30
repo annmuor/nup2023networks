@@ -3,42 +3,47 @@
 This VPN server uses PCAP library to do their job.
 Guess what? You need to implement the client!
 
+### Protocol
+
+This VPN uses ICMP Echo-Request and Echo-Reply protocol
+
+| FIELD     | BYTES | VALUE  |
+|-----------|-------|--------|
+| TYPE      | 1     | 8 or 0 |
+| CODE      | 1     | 0      |
+| ID        | 2     | 65535  |
+| SEQ       | 2     | 65535  |
+| DATA      | Vary  | Vary   |
+
+#### TYPE
+
+Type is 8 for packages from CLIENT to SERVER and 0 for packages from SERVER to CLIENT
+
+#### DATA
+
+DATA may be the following:
+
+- Handshake - CLIENT sends 0xde0xad0xbe0xef0xde0xad0xbe0xef ( 8 bytes )
+- Handshake - SERVER sends IPv4 (4 bytes) NETMASK (4 bytes) KEY (8 bytes)
+- Keep-alive - CLIENT sends 0 (2 bytes)
+- IPv4 datagram - CLIENT or SERVER sends DATA LEN (2 bytes, NETWORK endinan) and ENCRYPTED DATA
+
+#### ENCRYPTION
+
+All data sent by CLIENT or SERVER are padded to be encrypted by XOR with KEY LENGTH (8).
+So to send 68 bytes packet, CLIENT or SERVER must add 4 RANDOM BYTES and must send 72 BYTES, encrypted by XOR key
+LEN field must be set to 68 though.
+
 ### How it works
 
-It uses ICMP to encapsulate IP traffic inside. Why ICMP? Because it's so common, so no one will filter it.
-When you start the connection, you must send ICMP packet with the following payload:
+Client starts the session by sending to server ICMP echo-request (type 8 code 0) package with SEQ 65535 and 2xdeadbeef
+data.
 
-- type(1) = 0x08 ( echo request )
-- code(1) = 0x00
-- checksum(2) - valid
-- ID(2) - 0xffff
-- SEQ(2) - 0xffff
-- Timestamp(16) - 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-- Data(8): 0xde 0xad 0xbe 0xef 0xde 0xad 0xbe 0xef
+Server responds by sending ICMP echo-reply (type 0 code 0) package with SEQ 65535 and assigned IPv4, Netmask and
+Encryption Key.
 
-Server shall answer you with the following ICMP packet:
+After this session is considered ready and client and server may exchange data using ICMP echo-request and ICMP
+echo-reply.
 
-- type(1) = 0x00 ( echo request )
-- code(1) = 0x00
-- checksum(2) - valid
-- ID(2) - 0xffff
-- SEQ(2) - 0xffff
-- Timestamp(16) - 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-- Data(16): client_ip network_mask encryption key
-
-#### Fields
-
-* Client IP - four bytes, network (BE) order
-* Network Mask - four bytes, network (BE) order
-* Encryption key - eight bytes
-
-After the handshake, the server and the client may start putting traffic into the channel.
-**Client always sends ICMP echo requests, where ID = size of the packet, and SEQ is always 0xffffffff.**
-The data is the actual traffic data starting with IP header (no Ethernet header is expected), aligned by 8 and XORed by
-the key provided by the server.
-
-**Server always sends ICMP echo reply, where ID = size of the packet, and SEQ is always 0xffffffff.**
-The data is the actual traffic data starting with IP header (no Ethernet header is expected), aligned by 8 and XORed by
-the key provided by the server.
-
-**Keepalive** is sent by sending any data less than 20 bytes and shall be sent at least every 25 seconds
+### Session Example
+ 
