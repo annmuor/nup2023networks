@@ -1,12 +1,16 @@
+import ctypes
 from _socket import inet_ntoa, inet_aton
 from struct import unpack, pack
 from typing import Tuple
+
+import libpcap
+
 try:
     from random import randbytes
 except ImportError:
     def randbytes(_len: int) -> bytes:
         from random import randint
-        return bytearray([randint(0, 255) for _x in range(0,_len)])
+        return bytearray([randint(0, 255) for _x in range(0, _len)])
 
 
 def gen_crypto_key() -> bytes:
@@ -78,23 +82,6 @@ def netmask_to_prefix(netmask):
     return 32
 
 
-def pack_tcp_header(sport, dport, check=0):
-    tcp_seq = 0
-    tcp_ack = 0
-    tcp_doff = (5 << 4) + 0
-    tcp_flags = 0 + (1 << 1) + (0 << 2) + (0 << 3) + (0 << 4) + (0 << 5)
-    tcp_window = 0
-    tcp_hdr = pack('!HHLLBBHHH', sport, dport, tcp_seq, tcp_ack, tcp_doff, tcp_flags, tcp_window, check,
-                   0)
-    return tcp_hdr
-
-
-def unpack_tcp_header(header) -> Tuple[int, int, int]:
-    sport, dport, tcp_seq, tcp_ack, tcp_doff, \
-        tcp_flags, tcp_window, check, urg = unpack('!HHLLBBHHH', header)
-    return
-
-
 def repack_packet_with_checksum(packet: bytes) -> bytes:
     ip_saddr, ip_daddr, _proto, _len = unpack_ip_header(packet[:20])
     if _proto == 0x06:  # tcp
@@ -121,3 +108,43 @@ def repack_packet_with_checksum(packet: bytes) -> bytes:
         ip_hdr = pack_ip_header(ip_saddr, ip_daddr, 0x11, 20 + 8 + len(data))
         return ip_hdr + udp_hdr + data
     return packet
+
+
+def mac_to_bytes(mac: str) -> bytes:
+    return bytes([int(x, 16) for x in mac.split(':')])
+
+
+class PcapWrapper(object):
+    def __init__(self, interface: str):
+        err_buf = ctypes.c_buffer(libpcap.PCAP_ERRBUF_SIZE)
+        if libpcap.init(libpcap.PCAP_CHAR_ENC_UTF_8, err_buf) != 0:
+            print(f"pcap_init failed: {err_buf}")
+            exit(0)
+        self.handler = libpcap.create(interface.encode("utf-8"), err_buf)
+        if self.handler is None:
+            print(f"pcap_create failed: {err_buf}")
+            exit(0)
+        self.filter = None
+        libpcap.set_snaplen(self.handler, 65535)
+        libpcap.set_immediate_mode(self.handler, 1)
+
+    def set_filter(self, _filter: str):
+        bpf = libpcap.bpf_program()
+        if libpcap.compile(self.handler, bpf, _filter.encode("utf-8"), 1, libpcap.PCAP_NETMASK_UNKNOWN) == 0:
+            self.filter = bpf
+
+    def start_capture(self):
+        if libpcap.activate(self.handler) != 0:
+            libpcap.perror(self.handler, "pcap_activate error: ".encode("utf-8"))
+            exit(0)
+        if self.filter is not None:
+            libpcap.setfilter(self.handler, self.filter)
+
+    def next_packet(self) -> bytes:
+        hdr = libpcap.pkthdr()
+        data = libpcap.next(self.handler, hdr)
+        return bytes([data[x] for x in range(0, hdr.caplen)])
+
+    def inject_packet(self, packet: bytes):
+        if libpcap.inject(self.handler, packet, len(packet)) <= 0:
+            libpcap.perror(self.handler, "inject_activate error: ".encode("utf-8"))

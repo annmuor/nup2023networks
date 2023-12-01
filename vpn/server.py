@@ -1,9 +1,7 @@
-import ctypes
 import subprocess
 import threading
 import time
 from _socket import inet_ntoa, inet_aton
-from multiprocessing import Manager
 from struct import unpack, pack
 from threading import Thread
 
@@ -64,21 +62,10 @@ class VPNServer(object):
 
     def init_libpcap(self):
         try:
-            err_buf = ctypes.create_string_buffer(libpcap.PCAP_ERRBUF_SIZE)
-            self.inner_pcap = libpcap.create(self.inner_int.encode("utf-8"), err_buf)
-            if not self.inner_pcap:
-                print(f"Error: {err_buf}")
-                exit(1)
-            libpcap.set_immediate_mode(self.inner_pcap, 1)
-            libpcap.set_snaplen(self.inner_pcap, 65535)
-            self.outer_pcap = libpcap.create(self.outer_int.encode("utf-8"), err_buf)
-            if not self.outer_pcap:
-                print(f"Error: {err_buf}")
-                exit(1)
-            libpcap.set_immediate_mode(self.outer_pcap, 1)
-            libpcap.set_snaplen(self.outer_pcap, 65535)
-            libpcap.set_promisc(self.outer_pcap, 1)
-            libpcap.setdirection(self.outer_pcap, libpcap.PCAP_D_IN)
+            self.inner_pcap = proto.PcapWrapper(self.inner_int)
+            self.outer_pcap = proto.PcapWrapper(self.outer_int)
+            self.outer_pcap.set_filter("icmp[icmptype] = icmp-echo")
+            self.inner_pcap.set_filter(f"net {self.inner_ip}/{self.netmask}")
         except Exception as e:
             print(f"init_libpcap went wrong: {e}")
             exit(1)
@@ -94,7 +81,7 @@ class VPNServer(object):
         icmp_data = proto.pack_icmp(0, 0, client.last_icmp_id, 0xffff, data)
         ip_hdr = proto.pack_ip_header(client.srv_ip, client.cli_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
-        libpcap.inject(self.outer_pcap, buffer, len(buffer))
+        self.outer_pcap.inject_packet(buffer)
         client.handshake = True
         client._last = time.time()
         print(
@@ -126,7 +113,7 @@ class VPNServer(object):
         else:
             data = proto.repack_packet_with_checksum(data)
             buffer = eth_hdr + data
-            libpcap.inject(self.inner_pcap, buffer, len(buffer))
+            self.inner_pcap.inject_packet(buffer)
             client._last = time.time()
             print(f"[inject lo] {src} -> {dst} from {client.cli_ip}")
 
@@ -139,20 +126,16 @@ class VPNServer(object):
         icmp_data = proto.pack_icmp(0, 0, client.last_icmp_id, 0xffff, data)
         ip_hdr = proto.pack_ip_header(client.srv_ip, client.cli_ip, 0x01, len(icmp_data) + 20)
         buffer = eth_hdr + ip_hdr + icmp_data
-        libpcap.inject(self.outer_pcap, buffer, len(buffer))
+        self.outer_pcap.inject_packet(buffer)
         print(
             f"[inject {self.outer_int}] {client.cli_ip} -> {client.srv_ip} ( {inner_src_ip} -> {inner_dst_ip} )")
 
     def thread_outer(self, clients):
-        if libpcap.activate(self.outer_pcap) < 0:
-            print("Failed to activate outer pcap")
-            exit(1)
+        self.outer_pcap.start_capture()
         hs = {}
         while True:
             try:
-                hdr = libpcap.pkthdr()
-                data = libpcap.next(self.outer_pcap, hdr)
-                buff = bytes([data[x] for x in range(0, hdr.caplen)])
+                buff = self.outer_pcap.next_packet()
                 if len(buff) < 58:
                     continue
                 mac_dst, mac_src, eth_type = proto.unpack_eth_header(buff[:14])
@@ -165,14 +148,14 @@ class VPNServer(object):
                 data = buff[58:]
                 if icmp_type != 0x08 or icmp_code != 0x00 or icmp_seq != 0xffff:
                     continue
-                if ip_src in self.clients:
-                    client = self.clients[ip_src]
+                if ip_src in clients:
+                    client = clients[ip_src]
                 else:
                     client = VPNServerClient(cli_ip=ip_src, srv_ip=ip_dst, cli_mac=mac_src, srv_mac=mac_dst)
                 client.last_icmp_id = icmp_id
                 if data == b'\xde\xad\xbe\xef\xde\xad\xbe\xef':
                     self.send_handshake(client)
-                    self.clients[ip_src] = client
+                    clients[ip_src] = client
                     hs[ip_src] = True
                 else:
                     self.receive_data_from_client(client, data)
@@ -180,14 +163,10 @@ class VPNServer(object):
                 print(f"thread_outer exception: {e}")
 
     def thread_inner(self, clients):
-        if libpcap.activate(self.inner_pcap) < 0:
-            print("Failed to activate outer pcap")
-            exit(1)
+        self.inner_pcap.start_capture()
         while True:
             try:
-                hdr = libpcap.pkthdr()
-                data = libpcap.next(self.inner_pcap, hdr)
-                buff = bytes([data[x] for x in range(0, hdr.caplen)])
+                buff = self.inner_pcap.next_packet()
                 if len(buff) < 34:
                     continue
                 mac_dst, mac_src, eth_type = proto.unpack_eth_header(buff[:14])
