@@ -1,2 +1,2 @@
-libpcap==1.11.0b7
-pytest==7.4.3
+libpcap
+pytest
