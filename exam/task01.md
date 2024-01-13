@@ -1,0 +1,3 @@
+- You're given a [pcap file](task01.pcap) with large ( > 100000 ) amount of packets
+- Your goal is to find the flag into **multicast** UDP **packet** with **broken** IP checksum.
+- This the only packet contains flag
