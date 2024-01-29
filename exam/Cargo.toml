@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "0_keyset",
+    "0_keygen",
+    "0_writeflag",
+    "1_trafficgen",
+    "2_dns",
+    "3_http",
+    "4_tcp",
+    "5_wifigen",
+    "6_tls",
+    "7_rev"]
+

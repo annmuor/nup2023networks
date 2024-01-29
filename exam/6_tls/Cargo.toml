@@ -1,0 +1,14 @@
+[package]
+name = "tlss"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rustls = { path = "deps/rustls-0.22.1" }
+rcgen = "0.12.0"
+rand = "0.8.5"
+byteorder = "1.5.0"
+blowfish = "0.9.1"
+cipher = { version = "0.4.4", features = ["block-padding", "alloc"] }

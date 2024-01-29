@@ -1,0 +1,16 @@
+[package]
+name = "dns_server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+hickory-server = "0.24.0"
+anyhow = "1"
+async-trait = "0"
+rand = "0.8.5"
+blowfish = "0.9.1"
+cipher = { version = "0.4.4", features = ["block-padding", "alloc"] }
+byteorder = "1.5.0"
